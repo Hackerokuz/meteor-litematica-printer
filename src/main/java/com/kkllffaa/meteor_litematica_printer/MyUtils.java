@@ -6,7 +6,6 @@ import static meteordevelopment.meteorclient.utils.world.BlockUtils.canPlace;
 import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.RayTraceUtils;
 import baritone.api.utils.Rotation;
-import baritone.api.utils.RotationUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import net.minecraft.block.AmethystClusterBlock;
@@ -34,6 +33,7 @@ import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.block.WallBlock;
 import net.minecraft.block.enums.BlockHalf;
 import net.minecraft.block.enums.SlabType;
+import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
 import net.minecraft.state.property.Properties;
@@ -108,7 +108,7 @@ public class MyUtils {
                 Vec3d testHitPos = new Vec3d(placeX, placeY, placeZ);
      	        Vec3d playerHead = new Vec3d(mc.player.getX(), mc.player.getEyeY(), mc.player.getZ());
      						
-     			Rotation rot = RotationUtils.calcRotationFromVec3d(playerHead, testHitPos, new Rotation(mc.player.getYaw(), mc.player.getPitch()));
+     			Rotation rot = RotationStuff.calcRotationFromVec3d(playerHead, testHitPos, new Rotation(mc.player.getYaw(), mc.player.getPitch()));
      			Direction testHorizontalDirection = getHorizontalDirectionFromYaw(rot.normalize().getYaw());
 				if (requred.getBlock() instanceof TrapdoorBlock && !(s != Direction.DOWN && s != Direction.UP) && !isPlayerOrientationDesired(requred.getBlock(), blockHorizontalOrientation, testHorizontalDirection)
 						|| !(requred.getBlock() instanceof TrapdoorBlock) && !isPlayerOrientationDesired(requred.getBlock(), blockHorizontalOrientation, testHorizontalDirection)
@@ -367,7 +367,7 @@ public class MyUtils {
                  
                 Vec3d hitPos = new Vec3d(placeX, placeY, placeZ);
      	        Vec3d playerHead = new Vec3d(mc.player.getX(), mc.player.getEyeY(), mc.player.getZ());
-     			Rotation rot = RotationUtils.calcRotationFromVec3d(playerHead, hitPos, new Rotation(mc.player.getYaw(), mc.player.getPitch()));
+     			Rotation rot = RotationStuff.calcRotationFromVec3d(playerHead, hitPos, new Rotation(mc.player.getYaw(), mc.player.getPitch()));
 
 				Direction testHorizontalDirection = getHorizontalDirectionFromYaw(rot.normalize().getYaw());
 				if (placeAtState.getBlock() instanceof TrapdoorBlock && !(against != Direction.DOWN && against != Direction.UP) && !isPlayerOrientationDesired(placeAtState.getBlock(), blockHorizontalOrientation, testHorizontalDirection)
@@ -424,7 +424,7 @@ public class MyUtils {
             
             Vec3d hitPos = new Vec3d(neighbor.getX(), neighbor.getY(), neighbor.getZ());
  	        Vec3d playerHead = new Vec3d(mc.player.getX(), mc.player.getEyeY(), mc.player.getZ());
- 			Rotation rot = RotationUtils.calcRotationFromVec3d(playerHead, hitPos, new Rotation(mc.player.getYaw(), mc.player.getPitch()));
+ 			Rotation rot = RotationStuff.calcRotationFromVec3d(playerHead, hitPos, new Rotation(mc.player.getYaw(), mc.player.getPitch()));
 			
 			Direction testHorizontalDirection = getHorizontalDirectionFromYaw(rot.normalize().getYaw());
 

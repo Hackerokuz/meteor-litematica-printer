@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "Meteor Litematica Printer",
   "id": "meteor-litematica-printer",
-  "version": "${version}",
+  "version": "1.21.1",
   "description": "Fast printer for litematica made with meteor.",
   "authors": [
     "kkllffaa"
@@ -18,8 +18,8 @@
     ]
   },
   "depends": {
-    "java": ">=17",
-    "minecraft": ">=${mc_version}",
+    "java": ">=21",
+    "minecraft": ">=1.21.1",
     "meteor-client": "*"
   }
 }

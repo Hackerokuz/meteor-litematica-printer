@@ -11,7 +11,6 @@ import fi.dy.masa.litematica.data.DataManager;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import fi.dy.masa.litematica.world.WorldSchematic;
 import meteordevelopment.meteorclient.MeteorClient;
-import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.pathing.PathManagers;
@@ -32,22 +31,17 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockIterator;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import meteordevelopment.orbit.EventPriority;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.enums.BlockHalf;
 import net.minecraft.block.enums.SlabType;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.NbtComponent;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.network.packet.c2s.play.CreativeInventoryActionC2SPacket;
-import net.minecraft.network.packet.s2c.play.OverlayMessageS2CPacket;
 import net.minecraft.state.property.Properties;
-import net.minecraft.text.Text;
 import net.minecraft.util.Pair;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -215,6 +209,7 @@ public class Printer extends Module {
         );
 
     private int timer;
+    private int baritoneAutoWalkerTimer = 0;
     private int usedSlot = -1;
     private final List<BlockPos> toSort = new ArrayList<>();
     private boolean toSortWasEmptyLastTick = false;
@@ -359,10 +354,10 @@ public class Printer extends Module {
 			});
 			}
 
-			if(baritoneAutoWalker.get() && toSortWasEmptyLastTick)
+			if(baritoneAutoWalker.get() && toSortWasEmptyLastTick && baritoneAutoWalkerTimer < 1)
 			{
 				List<BlockPos> toSortByClosest =  new ArrayList<>();
-				BlockIterator.register(80, 80, (pos, blockState) -> {
+				BlockIterator.register(40, 40, (pos, blockState) -> {
 					BlockState required = worldSchematic.getBlockState(pos);
 					Item requiredItem = required.getBlock().asItem();
 					boolean isCreative = mc.player.getAbilities().creativeMode;
@@ -385,14 +380,19 @@ public class Printer extends Module {
 					{
 						toSortByClosest.sort(SortAlgorithm.Nearest.algorithm);
 						BlockPos blockToGoTo = toSortByClosest.get(0);
-						PathManagers.get().moveTo(blockToGoTo.up(2));
+						PathManagers.get().moveTo(blockToGoTo.up(2).east());
 						toSortWasEmptyLastTick = false;
 					}
 				});
+				baritoneAutoWalkerTimer = 20;
+			} else {
+				baritoneAutoWalkerTimer--;
 			}
 
 
-		} else timer++;
+		} else {
+			timer++;
+		}
 	}
 
 	public boolean place(BlockState required, BlockPos pos) {
@@ -449,7 +449,7 @@ public class Printer extends Module {
 		boolean isCreative = mc.player.getAbilities().creativeMode;
 		ItemStack requiredItemStack = item.getDefaultStack();
 		NbtCompound nbt = MyUtils.getNbtFromBlockState(state);
-		NbtComponent.set(DataComponentTypes.CUSTOM_DATA, requiredItemStack, nbt);
+		
 		FindItemResult result = InvUtils.find(item);
 		
 		if (!isCreative && !result.found()) return false;
