@@ -1,18 +1,20 @@
 package com.kkllffaa.meteor_litematica_printer;
 
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
-
-import com.mojang.authlib.minecraft.client.MinecraftClient;
 
 import fi.dy.masa.litematica.data.DataManager;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import fi.dy.masa.litematica.world.WorldSchematic;
 import meteordevelopment.meteorclient.MeteorClient;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.pathing.PathManagers;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.BlockListSetting;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -30,23 +32,23 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockIterator;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
+import meteordevelopment.orbit.EventPriority;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
-import net.minecraft.block.HopperBlock;
-import net.minecraft.block.HorizontalFacingBlock;
-import net.minecraft.block.StairsBlock;
 import net.minecraft.block.enums.BlockHalf;
 import net.minecraft.block.enums.SlabType;
-import net.minecraft.datafixer.fix.ChunkPalettedStorageFix.Facing;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.NbtComponent;
 import net.minecraft.item.Item;
-import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.network.packet.c2s.play.CreativeInventoryActionC2SPacket;
+import net.minecraft.network.packet.s2c.play.OverlayMessageS2CPacket;
 import net.minecraft.state.property.Properties;
+import net.minecraft.text.Text;
 import net.minecraft.util.Pair;
-import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Direction.Axis;
@@ -71,6 +73,15 @@ public class Printer extends Module {
 			.name("printing-delay")
 			.description("Delay between printing blocks in ticks.")
 			.defaultValue(2)
+			.min(0).sliderMin(0)
+			.max(100).sliderMax(40)
+			.build()
+	);
+	
+	private final Setting<Integer> printing_randomize_delay = sgGeneral.add(new IntSetting.Builder()
+			.name("printing-randomize-delay")
+			.description("How much to randomize up and down between printing blocks in ticks.")
+			.defaultValue(0)
 			.min(0).sliderMin(0)
 			.max(100).sliderMax(40)
 			.build()
@@ -195,10 +206,18 @@ public class Printer extends Module {
         .visible(renderBlocks::get)
         .build()
     );
+    
+    private final Setting<Boolean> baritoneAutoWalker = sgGeneral.add(new BoolSetting.Builder()
+            .name("baritone-auto-walk")
+            .description("Auto walk to unfinished blocks.")
+            .defaultValue(false)
+            .build()
+        );
 
     private int timer;
     private int usedSlot = -1;
     private final List<BlockPos> toSort = new ArrayList<>();
+    private boolean toSortWasEmptyLastTick = false;
     private final List<Pair<Integer, BlockPos>> placed_fade = new ArrayList<>();
 
 
@@ -239,20 +258,29 @@ public class Printer extends Module {
 
 		toSort.clear();
 
-
-		if (timer >= printing_delay.get()) {
+		int random_delay_ampplifier = ThreadLocalRandom.current().nextInt(Math.max(0, printing_delay.get() - printing_randomize_delay.get()), Math.min(101, printing_delay.get() + printing_randomize_delay.get() + 1));
+		if (timer >= random_delay_ampplifier && (!baritoneAutoWalker.get() || !PathManagers.get().isPathing())) {
+			if(!baritoneAutoWalker.get() || !toSortWasEmptyLastTick)
+			{
 			BlockIterator.register(printing_range.get() + 1, printing_range.get() + 1, (pos, blockState) -> {
 				BlockState required = worldSchematic.getBlockState(pos);
-
+				Item requiredItem = required.getBlock().asItem();
+				boolean isCreative = mc.player.getAbilities().creativeMode;
+				FindItemResult result = InvUtils.find(requiredItem);
+				
+				if (!isCreative && !result.found()) {
+					return;
+				}
+				
 				if (
-						mc.player.getBlockPos().isWithinDistance(pos, printing_range.get())
-						&& blockState.isReplaceable()
-						&& !required.isLiquid()
-						&& !required.isAir()
+						/*(previousBlockReplaced == null || !previousBlockReplaced.blockPos.isWithinDistance(pos, 3) || previousBlockReplaced.replaceCount < 3 && previousBlockReplaced.blockPos.isWithinDistance(pos, 3))
+						&&*/ mc.player.getBlockPos().isWithinDistance(pos, printing_range.get())
 						&& blockState.getBlock() != required.getBlock()
 						&& DataManager.getRenderLayerRange().isPositionWithinRange(pos)
 						&& !mc.player.getBoundingBox().intersects(Vec3d.of(pos), Vec3d.of(pos).add(1, 1, 1))
-						&& required.canPlaceAt(mc.world, pos)
+						&& !required.isAir()
+						&& ( (blockState.isReplaceable()
+						&& required.canPlaceAt(mc.world, pos)))
 					) {
 					boolean isBlockInLineOfSight = MyUtils.isBlockInLineOfSight(pos, required);
 			    	SlabType wantedSlabType = advanced.get() && required.contains(Properties.SLAB_TYPE) ? required.get(Properties.SLAB_TYPE) : null;
@@ -292,7 +320,11 @@ public class Printer extends Module {
 			});
 
 			BlockIterator.after(() -> {
-				//if (!tosort.isEmpty()) info(tosort.toString());
+				if (toSort.isEmpty()) 
+					{
+					toSortWasEmptyLastTick = true;
+					return;
+					}
 
 				if (firstAlgorithm.get() != SortAlgorithm.None) {
 					if (firstAlgorithm.get().applySecondSorting) {
@@ -312,6 +344,7 @@ public class Printer extends Module {
 
 					if (dirtgrass.get() && item == Items.GRASS_BLOCK)
 						item = Items.DIRT;
+					placed_fade.add(new Pair<>(fadeTime.get(), new BlockPos(pos)));
 					if (switchItem(item, state, () -> place(state, pos))) {
 						timer = 0;
 						placed++;
@@ -324,6 +357,39 @@ public class Printer extends Module {
 					}
 				}
 			});
+			}
+
+			if(baritoneAutoWalker.get() && toSortWasEmptyLastTick)
+			{
+				List<BlockPos> toSortByClosest =  new ArrayList<>();
+				BlockIterator.register(80, 80, (pos, blockState) -> {
+					BlockState required = worldSchematic.getBlockState(pos);
+					Item requiredItem = required.getBlock().asItem();
+					boolean isCreative = mc.player.getAbilities().creativeMode;
+					FindItemResult result = InvUtils.find(requiredItem);
+					
+					if (!isCreative && !result.found()) {
+						return;
+					}
+					if(blockState.getBlock() != required.getBlock()
+							&& !required.isAir()
+							&& DataManager.getRenderLayerRange().isPositionWithinRange(pos)
+					) {
+						if (!whitelistenabled.get() || whitelist.get().contains(required.getBlock())) {
+							toSortByClosest.add(new BlockPos(pos));
+						}
+					}
+				});
+				BlockIterator.after(() -> {
+					if(toSortByClosest.size() > 0)
+					{
+						toSortByClosest.sort(SortAlgorithm.Nearest.algorithm);
+						BlockPos blockToGoTo = toSortByClosest.get(0);
+						PathManagers.get().moveTo(blockToGoTo.up(2));
+						toSortWasEmptyLastTick = false;
+					}
+				});
+			}
 
 
 		} else timer++;
@@ -332,6 +398,14 @@ public class Printer extends Module {
 	public boolean place(BlockState required, BlockPos pos) {
 
 		if (mc.player == null || mc.world == null) return false;
+//		if(previousBlockReplaced != null && previousBlockReplaced.replaceCount > 2 && previousBlockReplaced.blockPos.isWithinDistance(pos, 3)) return false;
+//		if(previousBlockReplaced == null || !previousBlockReplaced.blockPos.equals(pos))
+//		{
+//			previousBlockReplaced = new prevBlockPosAndReplaceCount(pos);
+//		} else if (previousBlockReplaced != null && previousBlockReplaced.blockPos.equals(pos))
+//		{
+//			previousBlockReplaced.replaceCount += 1;
+//		}
 		if (!mc.world.getBlockState(pos).isReplaceable()) return false;
 
 		Direction wantedSide = advanced.get() ? dir(required) : null;
@@ -340,7 +414,8 @@ public class Printer extends Module {
     	Direction wantedHorizontalOrientation = advanced.get() && required.contains(Properties.HORIZONTAL_FACING) ? required.get(Properties.HORIZONTAL_FACING) : null;
     	Axis wantedAxies = advanced.get() && required.contains(Properties.AXIS) ? required.get(Properties.AXIS) : null;
     	Direction wantedHopperOrientation = advanced.get() && required.contains(Properties.HOPPER_FACING) ? required.get(Properties.HOPPER_FACING) : null;
-    	Direction wantedFace = advanced.get() && required.contains(Properties.FACING) ? required.get(Properties.FACING) : null;
+    	@SuppressWarnings("unused")
+		Direction wantedFace = advanced.get() && required.contains(Properties.FACING) ? required.get(Properties.FACING) : null;
     	
     	Direction placeSide = placeThroughWall.get() ?
     						MyUtils.getPlaceSide(
@@ -362,8 +437,9 @@ public class Printer extends Module {
     								wantedSide
 							);
     	
-
-        return MyUtils.place(pos, placeSide, wantedSlabType, wantedBlockHalf, wantedHorizontalOrientation != null ? wantedHorizontalOrientation : wantedHopperOrientation, wantedAxies, airPlace.get(), swing.get(), rotate.get(), clientSide.get(), printing_range.get());
+    	
+    	return MyUtils.place(pos, required, placeSide, wantedSlabType, wantedBlockHalf, wantedHorizontalOrientation != null ? wantedHorizontalOrientation : wantedHopperOrientation, wantedAxies, airPlace.get(), swing.get(), rotate.get() || advanced.get(), clientSide.get(), printing_range.get());
+    	
 	}
 
 	private boolean switchItem(Item item, BlockState state, Supplier<Boolean> action) {
@@ -372,9 +448,11 @@ public class Printer extends Module {
 		int selectedSlot = mc.player.getInventory().selectedSlot;
 		boolean isCreative = mc.player.getAbilities().creativeMode;
 		ItemStack requiredItemStack = item.getDefaultStack();
-		NbtCompound nbt = MyUtils.getNbtFromBlockState(requiredItemStack, state);
-		requiredItemStack.setNbt(nbt);
+		NbtCompound nbt = MyUtils.getNbtFromBlockState(state);
+		NbtComponent.set(DataComponentTypes.CUSTOM_DATA, requiredItemStack, nbt);
 		FindItemResult result = InvUtils.find(item);
+		
+		if (!isCreative && !result.found()) return false;
 
 
 		// TODO: Check if ItemStack nbt has BlockStateTag == BlockState required when in creative
@@ -385,7 +463,7 @@ public class Printer extends Module {
 			isCreative &&
 			mc.player.getMainHandStack().getItem() == item &&
 			ItemStack
-			.canCombine(
+			.areItemsAndComponentsEqual(
 			mc.player.getMainHandStack()
 			,
 			requiredItemStack)
@@ -403,7 +481,7 @@ public class Printer extends Module {
 			usedSlot != -1 &&
 			mc.player.getInventory().getStack(usedSlot).getItem() == item &&
 			ItemStack
-			.canCombine(
+			.areItemsAndComponentsEqual(
 			mc.player.getInventory().getStack(usedSlot),
 			requiredItemStack)
 		) {
@@ -423,7 +501,7 @@ public class Printer extends Module {
 			result.found() &&
 			result.slot() != -1 &&
 			ItemStack
-			.canCombine(
+			.areItemsAndComponentsEqual(
 			requiredItemStack,
 			mc.player.getInventory().getStack(result.slot())
 			)
@@ -489,10 +567,23 @@ public class Printer extends Module {
 	@EventHandler
 	private void onRender(Render3DEvent event) {
 		placed_fade.forEach(s -> {
-			Color a = new Color(colour.get().r, colour.get().g, colour.get().b, (int) (((float)s.getLeft() / (float) fadeTime.get()) * colour.get().a));
-			event.renderer.box(s.getRight(), a, null, ShapeMode.Sides, 0);
+			Color color = new Color(colour.get().r, colour.get().g, colour.get().b, (int) (((float)s.getLeft() / (float) fadeTime.get()) * colour.get().a));
+			event.renderer.box(s.getRight(), color, null, ShapeMode.Sides, 0);
 		});
 	}
+	
+	public boolean isWhitelistEnabled() {
+		return whitelistenabled.get();
+	}
+	
+	public List<Block> getWhitelist() {
+		return whitelist.get();
+	}
+	
+	public MinecraftClient getMC() {
+		return mc;
+	}
+
 
 	@SuppressWarnings("unused")
 	public enum SortAlgorithm {
@@ -504,7 +595,7 @@ public class Printer extends Module {
 
 
 		final boolean applySecondSorting;
-		final Comparator<BlockPos> algorithm;
+		public final Comparator<BlockPos> algorithm;
 
 		SortAlgorithm(boolean applySecondSorting, Comparator<BlockPos> algorithm) {
 			this.applySecondSorting = applySecondSorting;
